@@ -152,7 +152,11 @@ func handleConnection(conn net.Conn) {
 		} else {
 			switch {
 			case strings.HasPrefix(line, "HELO") || strings.HasPrefix(line, "EHLO"):
-				conn.Write([]byte("250 Hello\r\n"))
+				conn.Write([]byte("250-Hello\r\n"))
+				conn.Write([]byte("250 AUTH LOGIN PLAIN\r\n")) // Advertise AUTH, but we'll ignore it
+			case strings.HasPrefix(line, "AUTH"):
+				// Ignore AUTH command and respond as if authenticated
+				conn.Write([]byte("235 Authentication successful\r\n"))
 			case strings.HasPrefix(line, "MAIL FROM:"):
 				from = strings.TrimPrefix(line, "MAIL FROM:")
 				conn.Write([]byte("250 OK\r\n"))
