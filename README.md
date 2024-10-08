@@ -1,4 +1,4 @@
-# 📧 Go SMTP Rate-limiting Server Server
+# 📧 Go SMTP Rate-limiting Server
 
 ## 📚 Table of Contents
 
