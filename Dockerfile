@@ -14,10 +14,10 @@ RUN go mod download
 COPY . .
 
 # Build the Go app
-RUN go build -o main .
+RUN make
 
 # Expose port 25 to the outside world
 EXPOSE 25
 
 # Command to run the executable
-CMD ["./main"]
+CMD ["/app/smtp-rate-limiter"]

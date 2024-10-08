@@ -36,6 +36,7 @@ type Config struct {
 	AltSmtpPassword  string
 	AltSmtpEncryption string
 	FromAddresses    []string
+	BindAddress      string
 }
 
 type RateLimiter struct {
@@ -73,6 +74,7 @@ func init() {
 		AltSmtpPassword:  getEnv("ALT_SMTP_PASSWORD", ""),
 		AltSmtpEncryption: getEnv("ALT_SMTP_ENCRYPTION", "plain"),
 		FromAddresses:    parseFromAddresses(getEnv("FROM", "")),
+		BindAddress:      getEnv("BIND_ADDRESS", "127.0.0.1"),
 	}
 
 	if config.SentryDSN != "" {
@@ -107,13 +109,13 @@ func getEnvAsInt(key string, fallback int) int {
 }
 
 func main() {
-	listener, err := net.Listen("tcp", "127.0.0.1:25")
+	listener, err := net.Listen("tcp", config.BindAddress+":25")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer listener.Close()
 
-	log.Println("SMTP server started")
+	log.Println("SMTP server started on", config.BindAddress+":25")
 
 	for {
 		conn, err := listener.Accept()

@@ -4,7 +4,7 @@ services:
   smtp-forwarder:
     build: .
     ports:
-      - "127.0.0.1.25:25"
+      - "127.0.0.1:2525:25"
     environment:
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT}
@@ -22,6 +22,5 @@ services:
       - ALT_SMTP_PASSWORD=${ALT_SMTP_PASSWORD}
       - ALT_SMTP_ENCRYPTION=${ALT_SMTP_ENCRYPTION}
       - FROM=${FROM}
-    volumes:
-      - .:/app
+      - BIND_ADDRESS=0.0.0.0
     restart: unless-stopped
