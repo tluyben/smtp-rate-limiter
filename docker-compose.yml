@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  smtp-forwarder:
+    build: .
+    ports:
+      - "127.0.0.1.25:25"
+    environment:
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_ENCRYPTION=${SMTP_ENCRYPTION}
+      - DAILY_RATE_LIMIT=${DAILY_RATE_LIMIT}
+      - HOURLY_RATE_LIMIT=${HOURLY_RATE_LIMIT}
+      - MONTHLY_RATE_LIMIT=${MONTHLY_RATE_LIMIT}
+      - WARN_RATE=${WARN_RATE}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - ALT_SMTP_HOST=${ALT_SMTP_HOST}
+      - ALT_SMTP_PORT=${ALT_SMTP_PORT}
+      - ALT_SMTP_USER=${ALT_SMTP_USER}
+      - ALT_SMTP_PASSWORD=${ALT_SMTP_PASSWORD}
+      - ALT_SMTP_ENCRYPTION=${ALT_SMTP_ENCRYPTION}
+      - FROM=${FROM}
+    volumes:
+      - .:/app
+    restart: unless-stopped
