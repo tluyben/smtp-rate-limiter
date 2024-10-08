@@ -60,7 +60,7 @@ SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=your_username
 SMTP_PASSWORD=your_password
-SMTP_ENCRYPTION=tls
+SMTP_ENCRYPTION=starttls
 DAILY_RATE_LIMIT=100
 HOURLY_RATE_LIMIT=10
 MONTHLY_RATE_LIMIT=1000
@@ -83,6 +83,52 @@ go run main.go
 ```
 
 The server will start listening on `127.0.0.1:25` for incoming SMTP connections.
+
+Example send:
+
+```
+swaks --to recipient@example.com \
+      --from sender@example.com \
+      --header "Subject: Test Email" \
+      --body "This is a test email sent using swaks." \
+      --server 127.0.0.1 \
+      --port 25
+
+swaks --to rep1@example.com,rep2@example.com \
+      --from support@example.com \
+      --header "Subject: Test Email" \
+      --body "This is a test email sent using swaks." \
+      --server 127.0.0.1 \
+      --port 25
+
+swaks --to "Jim Johnson <rep1@example.com>","Frank Frakkel <rep2@example.com>" \
+      --from "Support Team <support@example.com>" \
+      --header "Subject: Test Email" \
+      --body "This is a test email sent using swaks." \
+      --server 127.0.0.1 \
+      --port 25
+
+swaks --to "Jim Johnson <rep1@example.com>" \
+      --from "Support Team <support@example.com>" \
+      --header "Subject: Test Email with Reply-To" \
+      --header "Reply-To: Customer Service <someone@example.com>" \
+      --body "This is a test email sent using swaks with a Reply-To header." \
+      --server 127.0.0.1 \
+      --port 25
+
+swaks --to "Jim Johnson <rep1@example.com>" \
+      --from "Support Team <support@example.com>" \
+      --header "Subject: Test Email with Reply-To" \
+      --header "Reply-To: Customer Service <someone@example.com>" \
+      --header "List-Unsubscribe: <mailto:unsubscribe@example.com?subject=unsubscribe>" \
+      --body "This is a test email sent using swaks with a Reply-To header." \
+	  --auth-user slop \
+	  --auth-password withbob \
+      --attach-type "text/plain" \
+      --attach @"./README.md" \
+      --server 127.0.0.1 \
+      --port 25
+```
 
 ## 🚦 Rate Limiting
 

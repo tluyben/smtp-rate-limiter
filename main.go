@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"os"
 	"strconv"
@@ -71,7 +72,7 @@ func init() {
 		AltSmtpUser:      getEnv("ALT_SMTP_USER", ""),
 		AltSmtpPassword:  getEnv("ALT_SMTP_PASSWORD", ""),
 		AltSmtpEncryption: getEnv("ALT_SMTP_ENCRYPTION", "plain"),
-		FromAddresses:    strings.Split(getEnv("FROM", ""), ","),
+		FromAddresses:    parseFromAddresses(getEnv("FROM", "")),
 	}
 
 	if config.SentryDSN != "" {
@@ -112,6 +113,8 @@ func main() {
 	}
 	defer listener.Close()
 
+	log.Println("SMTP server started")
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -122,6 +125,23 @@ func main() {
 	}
 }
 
+func parseFromAddresses(fromEnv string) []string {
+	if fromEnv == "" {
+		return nil
+	}
+	addresses := strings.Split(fromEnv, ",")
+	var validAddresses []string
+	for _, addr := range addresses {
+		trimmedAddr := strings.TrimSpace(addr)
+		if trimmedAddr != "" {
+			validAddresses = append(validAddresses, trimmedAddr)
+		}
+	}
+	if len(validAddresses) == 0 {
+		return nil
+	}
+	return validAddresses
+}
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
@@ -129,7 +149,6 @@ func handleConnection(conn net.Conn) {
 	conn.Write([]byte("220 SMTP Server Ready\r\n"))
 
 	scanner := bufio.NewScanner(conn)
-	var from, to string
 	var data bytes.Buffer
 	var inData bool
 
@@ -139,7 +158,8 @@ func handleConnection(conn net.Conn) {
 		if inData {
 			if line == "." {
 				inData = false
-				if err := forwardEmail(from, to, data.Bytes()); err != nil {
+				log.Println("Forwarding email")
+				if err := forwardEmail(data.Bytes()); err != nil {
 					log.Printf("Error forwarding email: %v", err)
 					conn.Write([]byte("554 Transaction failed\r\n"))
 				} else {
@@ -158,10 +178,8 @@ func handleConnection(conn net.Conn) {
 				// Ignore AUTH command and respond as if authenticated
 				conn.Write([]byte("235 Authentication successful\r\n"))
 			case strings.HasPrefix(line, "MAIL FROM:"):
-				from = strings.TrimPrefix(line, "MAIL FROM:")
 				conn.Write([]byte("250 OK\r\n"))
 			case strings.HasPrefix(line, "RCPT TO:"):
-				to = strings.TrimPrefix(line, "RCPT TO:")
 				conn.Write([]byte("250 OK\r\n"))
 			case line == "DATA":
 				inData = true
@@ -176,12 +194,45 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func forwardEmail(from, to string, data []byte) error {
+
+func extractAddresses(data []byte) (from string, to []string) {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "From:") {
+			from = strings.TrimSpace(strings.TrimPrefix(line, "From:"))
+		} else if strings.HasPrefix(line, "To:") {
+			toLine := strings.TrimSpace(strings.TrimPrefix(line, "To:"))
+			to = parseAddressList(toLine)
+		}
+		if from != "" && len(to) > 0 {
+			break
+		}
+	}
+	return
+}
+
+func parseAddressList(addressList string) []string {
+	var parsed []string
+	addresses, err := mail.ParseAddressList(addressList)
+	if err != nil {
+		log.Printf("Error parsing address list: %v", err)
+		return strings.Split(addressList, ",")
+	}
+	for _, addr := range addresses {
+		parsed = append(parsed, addr.Address)
+	}
+	return parsed
+}
+
+func forwardEmail(data []byte) error {
+	from, to := extractAddresses(data)
+
 	if !checkRateLimit() {
 		return fmt.Errorf("rate limit exceeded")
 	}
 
-	if len(config.FromAddresses) > 0 && !isAllowedFrom(from) {
+	if len(config.FromAddresses) > 0 && !isAllowedFrom(extractEmailAddress(from)) {
 		logMessage(fmt.Sprintf("Unauthorized 'From' address: %s", from), true)
 		return fmt.Errorf("unauthorized 'From' address")
 	}
@@ -200,66 +251,104 @@ func forwardEmail(from, to string, data []byte) error {
 	return err
 }
 
-func sendEmail(host string, port int, user, password, encryption, from, to string, data []byte) error {
-	auth := smtp.PlainAuth("", user, password, host)
+func extractEmailAddress(address string) string {
+	addr, err := mail.ParseAddress(address)
+	if err != nil {
+		log.Printf("Error parsing email address: %v", err)
+		return address
+	}
+	return addr.Address
+}
+
+func sendEmail(host string, port int, user, password, encryption, from string, to []string, data []byte) error {
+	log.Printf("Attempting to send email via %s:%d using %s encryption", host, port, encryption)
 
 	var conn net.Conn
 	var err error
+	address := fmt.Sprintf("%s:%d", host, port)
 
 	switch encryption {
 	case "ssl", "tls":
-		conn, err = tls.Dial("tcp", fmt.Sprintf("%s:%d", host, port), nil)
+		tlsConfig := &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: false,
+		}
+		log.Printf("Attempting TLS connection to %s", address)
+		conn, err = tls.Dial("tcp", address, tlsConfig)
 	default:
-		conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
+		log.Printf("Attempting plain TCP connection to %s", address)
+		conn, err = net.Dial("tcp", address)
 	}
 
 	if err != nil {
-		return err
+		log.Printf("Error connecting to %s: %v", address, err)
+		return fmt.Errorf("connection error: %v", err)
 	}
 	defer conn.Close()
 
-	client, err := smtp.NewClient(conn, host)
+	c, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return err
+		log.Printf("Error creating SMTP client: %v", err)
+		return fmt.Errorf("SMTP client creation error: %v", err)
 	}
-	defer client.Close()
+	defer c.Close()
 
-	if encryption == "tls" {
-		if err = client.StartTLS(nil); err != nil {
-			return err
+	if encryption == "starttls" {
+		log.Println("Attempting STARTTLS")
+		err = c.StartTLS(&tls.Config{ServerName: host})
+		if err != nil {
+			log.Printf("StartTLS error: %v", err)
+			return fmt.Errorf("StartTLS error: %v", err)
 		}
 	}
 
-	if err = client.Auth(auth); err != nil {
-		return err
+	if user != "" {
+		auth := smtp.PlainAuth("", user, password, host)
+		if err = c.Auth(auth); err != nil {
+			log.Printf("Auth error: %v", err)
+			return fmt.Errorf("auth error: %v", err)
+		}
 	}
 
-	if err = client.Mail(from); err != nil {
-		return err
+	if err = c.Mail(extractEmailAddress(from)); err != nil {
+		log.Printf("MAIL FROM error: %v", err)
+		return fmt.Errorf("MAIL FROM error: %v", err)
 	}
 
-	if err = client.Rcpt(to); err != nil {
-		return err
+	for _, recipient := range to {
+		if err = c.Rcpt(recipient); err != nil {
+			log.Printf("RCPT TO error for %s: %v", recipient, err)
+			return fmt.Errorf("RCPT TO error for %s: %v", recipient, err)
+		}
 	}
 
-	writer, err := client.Data()
+	w, err := c.Data()
 	if err != nil {
-		return err
+		log.Printf("DATA command error: %v", err)
+		return fmt.Errorf("DATA command error: %v", err)
 	}
 
-	_, err = writer.Write(data)
+	_, err = w.Write(data)
 	if err != nil {
-		return err
+		log.Printf("Error writing email data: %v", err)
+		return fmt.Errorf("error writing email data: %v", err)
 	}
 
-	err = writer.Close()
+	err = w.Close()
 	if err != nil {
-		return err
+		log.Printf("Error closing data writer: %v", err)
+		return fmt.Errorf("error closing data writer: %v", err)
 	}
 
-	return client.Quit()
+	err = c.Quit()
+	if err != nil {
+		log.Printf("QUIT command error: %v", err)
+		return fmt.Errorf("QUIT command error: %v", err)
+	}
+
+	log.Println("Email sent successfully")
+	return nil
 }
-
 func checkRateLimit() bool {
 	limiter.mutex.Lock()
 	defer limiter.mutex.Unlock()
