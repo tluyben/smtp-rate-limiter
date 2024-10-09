@@ -37,6 +37,7 @@ type Config struct {
 	AltSmtpEncryption string
 	FromAddresses    []string
 	BindAddress      string
+	ToAddresses	  []string
 }
 
 type RateLimiter struct {
@@ -75,6 +76,7 @@ func init() {
 		AltSmtpEncryption: getEnv("ALT_SMTP_ENCRYPTION", "plain"),
 		FromAddresses:    parseFromAddresses(getEnv("FROM", "")),
 		BindAddress:      getEnv("BIND_ADDRESS", "127.0.0.1"),
+		ToAddresses:	  parseToAddresses(getEnv("TO", "")),
 	}
 
 	if config.SentryDSN != "" {
@@ -126,7 +128,23 @@ func main() {
 		go handleConnection(conn)
 	}
 }
-
+func parseToAddresses(toEnv string) []string {
+	if toEnv == "" {
+		return nil
+	}
+	addresses := strings.Split(toEnv, ",")
+	var validAddresses []string
+	for _, addr := range addresses {
+		trimmedAddr := strings.TrimSpace(addr)
+		if trimmedAddr != "" {
+			validAddresses = append(validAddresses, trimmedAddr)
+		}
+	}
+	if len(validAddresses) == 0 {
+		return nil
+	}
+	return validAddresses
+}
 func parseFromAddresses(fromEnv string) []string {
 	if fromEnv == "" {
 		return nil
@@ -236,6 +254,10 @@ func forwardEmail(data []byte) error {
 
 	if len(config.FromAddresses) > 0 && !isAllowedFrom(extractEmailAddress(from)) {
 		logMessage(fmt.Sprintf("Unauthorized 'From' address: %s", from), true)
+		return fmt.Errorf("unauthorized 'From' address")
+	}
+	if len(config.ToAddresses) > 0 && !isAllowedTo(to) {
+		logMessage(fmt.Sprintf("Unauthorized 'To' address: %s", from), true)
 		return fmt.Errorf("unauthorized 'From' address")
 	}
 
@@ -409,11 +431,27 @@ func checkWarnRate(period string, current, limit int) {
 
 func isAllowedFrom(from string) bool {
 	for _, allowed := range config.FromAddresses {
-		if strings.TrimSpace(allowed) == strings.TrimSpace(from) {
+		if strings.Contains(strings.ToLower(from), strings.ToLower(allowed)) {
 			return true
 		}
 	}
 	return false
+}
+
+func isAllowedTo(to []string) bool {
+	for _, recipient := range to {
+		isRecipientAllowed := false
+		for _, allowed := range config.ToAddresses {
+			if strings.Contains(strings.ToLower(recipient), strings.ToLower(allowed)) {
+				isRecipientAllowed = true
+				break
+			}
+		}
+		if !isRecipientAllowed {
+			return false
+		}
+	}
+	return true
 }
 
 func logMessage(message string, isError bool) {
