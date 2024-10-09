@@ -171,10 +171,11 @@ func handleConnection(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	var data bytes.Buffer
 	var inData bool
+	var authState int // 0: not started, 1: waiting for username, 2: waiting for password
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+		fmt.Println(line)
 		if inData {
 			if line == "." {
 				inData = false
@@ -193,9 +194,17 @@ func handleConnection(conn net.Conn) {
 			switch {
 			case strings.HasPrefix(line, "HELO") || strings.HasPrefix(line, "EHLO"):
 				conn.Write([]byte("250-Hello\r\n"))
-				conn.Write([]byte("250 AUTH LOGIN PLAIN\r\n")) // Advertise AUTH, but we'll ignore it
-			case strings.HasPrefix(line, "AUTH"):
-				// Ignore AUTH command and respond as if authenticated
+				conn.Write([]byte("250 AUTH LOGIN PLAIN\r\n")) // Advertise AUTH
+			case strings.HasPrefix(line, "AUTH LOGIN"):
+				authState = 1
+				conn.Write([]byte("334 VXNlcm5hbWU6\r\n")) // Base64 for "Username:"
+			case authState == 1:
+				// Ignore the actual username
+				authState = 2
+				conn.Write([]byte("334 UGFzc3dvcmQ6\r\n")) // Base64 for "Password:"
+			case authState == 2:
+				// Ignore the actual password
+				authState = 0
 				conn.Write([]byte("235 Authentication successful\r\n"))
 			case strings.HasPrefix(line, "MAIL FROM:"):
 				conn.Write([]byte("250 OK\r\n"))
