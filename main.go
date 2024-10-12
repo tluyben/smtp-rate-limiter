@@ -111,6 +111,8 @@ func getEnvAsInt(key string, fallback int) int {
 }
 
 func main() {
+	initRateLimiter()
+
 	listener, err := net.Listen("tcp", config.BindAddress+":25")
 	if err != nil {
 		log.Fatal(err)
@@ -382,14 +384,65 @@ func sendEmail(host string, port int, user, password, encryption, from string, t
 	log.Println("Email sent successfully")
 	return nil
 }
+func initRateLimiter() {
+	limiter = RateLimiter{
+		hourly:  0,
+		daily:   0,
+		monthly: 0,
+	}
+
+	go rateLimiterResetRoutine()
+}
+
+func rateLimiterResetRoutine() {
+	hourTicker := time.NewTicker(time.Hour)
+	dayTicker := time.NewTicker(24 * time.Hour)
+	
+	// Initialize the monthTicker
+	now := time.Now()
+	nextMonth := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location())
+	monthTicker := time.NewTicker(nextMonth.Sub(now))
+
+	for {
+		select {
+		case <-hourTicker.C:
+			resetHourlyLimit()
+		case <-dayTicker.C:
+			resetDailyLimit()
+		case <-monthTicker.C:
+			resetMonthlyLimit()
+			// Recalculate the duration for the next month
+			now := time.Now()
+			nextMonth := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location())
+			monthTicker.Reset(nextMonth.Sub(now))
+		}
+	}
+}
+
+func resetHourlyLimit() {
+	limiter.mutex.Lock()
+	defer limiter.mutex.Unlock()
+	limiter.hourly = 0
+	log.Println("Hourly rate limit reset")
+}
+
+func resetDailyLimit() {
+	limiter.mutex.Lock()
+	defer limiter.mutex.Unlock()
+	limiter.daily = 0
+	log.Println("Daily rate limit reset")
+}
+
+func resetMonthlyLimit() {
+	limiter.mutex.Lock()
+	defer limiter.mutex.Unlock()
+	limiter.monthly = 0
+	log.Println("Monthly rate limit reset")
+}
+
 func checkRateLimit() bool {
 	limiter.mutex.Lock()
 	defer limiter.mutex.Unlock()
-
-	now := time.Now()
-	hour := now.Hour()
-	day := now.Day()
-	month := int(now.Month())
 
 	if config.HourlyRateLimit > 0 && limiter.hourly >= config.HourlyRateLimit {
 		logMessage("Hourly rate limit exceeded", true)
@@ -414,17 +467,6 @@ func checkRateLimit() bool {
 	checkWarnRate("hourly", limiter.hourly, config.HourlyRateLimit)
 	checkWarnRate("daily", limiter.daily, config.DailyRateLimit)
 	checkWarnRate("monthly", limiter.monthly, config.MonthlyRateLimit)
-
-	// Reset counters if necessary
-	if hour == 0 && limiter.hourly > 0 {
-		limiter.hourly = 0
-	}
-	if day == 1 && limiter.daily > 0 {
-		limiter.daily = 0
-	}
-	if month == 1 && limiter.monthly > 0 {
-		limiter.monthly = 0
-	}
 
 	return true
 }
