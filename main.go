@@ -508,10 +508,17 @@ func isAllowedTo(to []string) bool {
 func logMessage(message string, isError bool) {
 	log.Println(message)
 	if config.SentryDSN != "" {
-		if isError {
-			sentry.CaptureException(fmt.Errorf(message))
-		} else {
+		sentry.WithScope(func(scope *sentry.Scope) {
+			if isError {
+				scope.SetLevel(sentry.LevelError)
+				
+			} else {
+				scope.SetLevel(sentry.LevelInfo)
+			}
+
+			// Capture the message
 			sentry.CaptureMessage(message)
-		}
+		})
+		sentry.Flush(time.Second * 5)
 	}
 }
